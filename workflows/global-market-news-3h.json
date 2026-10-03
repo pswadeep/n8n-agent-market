@@ -1,6 +1,6 @@
 {
   "id": "wfGlobalNews3h01",
-  "name": "Global Markets News - US/London/Asia (every 3h)",
+  "name": "Global Markets News - Yahoo + Google News + Finnhub (every 3h)",
   "active": false,
   "nodes": [
     {
@@ -14,7 +14,7 @@
           ]
         }
       },
-      "id": "g1",
+      "id": "g0a",
       "name": "Every 3 Hours",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -25,7 +25,7 @@
     },
     {
       "parameters": {},
-      "id": "g2",
+      "id": "g0b",
       "name": "Manual Test",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
@@ -36,9 +36,9 @@
     },
     {
       "parameters": {
-        "jsCode": "// Add or remove RSS feeds here. Region is derived from the article domain in 'Format Message'.\nconst feeds = [\n  { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664' }, // US\n  { url: 'https://finance.yahoo.com/news/rssindex' },                                              // US\n  { url: 'https://feeds.bbci.co.uk/news/business/rss.xml' },                                       // London\n  { url: 'https://www.theguardian.com/business/rss' },                                             // London\n  { url: 'https://asia.nikkei.com/rss/feed/nar' },                                                 // Asia\n  { url: 'https://www.straitstimes.com/news/business/rss.xml' },                                   // Asia\n];\nreturn feeds.map(f => ({ json: f }));"
+        "jsCode": "// RSS feeds: Yahoo Finance + Google News searches. Add/remove lines freely.\nconst gn = (q, c = 'US') =>\n  `https://news.google.com/rss/search?q=${encodeURIComponent(q)}%20when:1d&hl=en-${c}&gl=${c}&ceid=${c}:en`;\nconst feeds = [\n  // ---- Yahoo Finance ----\n  'https://finance.yahoo.com/news/rssindex',\n  'https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC,%5EDJI,%5EIXIC,%5ENSEI,%5EBSESN&region=US&lang=en-US',\n  // ---- Google News: international (Trump / exchanges / big money) ----\n  gn('Trump stock market'),\n  gn('Wall Street stock exchange stocks'),\n  gn('institutional investors billion inflows markets'),\n  gn('FTSE London Nikkei Hang Seng markets'),\n  // ---- Google News: India ----\n  gn('Nifty Sensex', 'IN'),\n  gn('FII DII flows India stock market', 'IN'),\n];\nreturn feeds.map(url => ({ json: { url } }));"
       },
-      "id": "g3",
+      "id": "g1",
       "name": "Feed List",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -52,7 +52,7 @@
         "url": "={{ $json.url }}",
         "options": {}
       },
-      "id": "g4",
+      "id": "g2",
       "name": "Read RSS",
       "type": "n8n-nodes-base.rssFeedRead",
       "typeVersion": 1.2,
@@ -65,14 +65,48 @@
     },
     {
       "parameters": {
-        "jsCode": "// domain suffix -> region. Extend this map when you add feeds.\nconst MAP = {\n  'cnbc.com': 'US', 'yahoo.com': 'US',\n  'bbc.co.uk': 'LONDON', 'bbc.com': 'LONDON', 'theguardian.com': 'LONDON',\n  'nikkei.com': 'ASIA', 'straitstimes.com': 'ASIA',\n};\nconst regionOf = link => {\n  try { const h = new URL(link).hostname; for (const k in MAP) if (h.endsWith(k)) return MAP[k]; } catch (e) {}\n  return 'OTHER';\n};\nconst HOURS = Number($env.NEWS_LOOKBACK_HOURS || 3.25);   // look-back window; set NEWS_LOOKBACK_HOURS=8 for 4 runs/day\nconst cutoff = Date.now() - HOURS * 3600 * 1000;\nconst PER_REGION = 4;\nconst esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n\nconst buckets = { US: [], LONDON: [], ASIA: [], OTHER: [] };\nconst seen = new Set();\nfor (const it of $input.all()) {\n  const j = it.json;\n  if (!j.title || !j.link || seen.has(j.link)) continue;   // skips failed feeds too\n  seen.add(j.link);\n  const t = Date.parse(j.isoDate || j.pubDate || '');\n  if (!isNaN(t) && t < cutoff) continue;                   // too old\n  buckets[regionOf(j.link)].push({ title: j.title, link: j.link, t: isNaN(t) ? 0 : t });\n}\nconst heads = { US: '🇺🇸 <b>US</b>', LONDON: '🇬🇧 <b>London / Europe</b>', ASIA: '🌏 <b>Asia</b>' };\nconst now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });\nlet text = `🌍 <b>Global Markets News</b> — ${now} IST`;\nfor (const r of ['US', 'LONDON', 'ASIA']) {\n  const list = buckets[r].sort((a, b) => b.t - a.t).slice(0, PER_REGION);\n  text += `\\n\\n${heads[r]}\\n` + (list.length\n    ? list.map(x => `• <a href=\"${esc(x.link)}\">${esc(x.title)}</a>`).join('\\n')\n    : '• no new headlines in this window');\n}\nreturn [{ json: { text } }];"
+        "url": "=https://finnhub.io/api/v1/news?category=general&token={{ $env.FINNHUB_API_KEY }}",
+        "options": {}
+      },
+      "id": "g3",
+      "name": "Finnhub General",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        100
+      ],
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "=https://finnhub.io/api/v1/news?category=merger&token={{ $env.FINNHUB_API_KEY }}",
+        "options": {}
+      },
+      "id": "g4",
+      "name": "Finnhub Merger",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        980,
+        100
+      ],
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===================== settings you can edit =====================\nconst INTL_COUNT  = 5;    // international items: Trump / stock exchanges / big money flows\nconst OTHER_COUNT = 7;    // other market items (India first, then general)  -> 12 per run, never below MIN_TOTAL if available\nconst MIN_TOTAL   = 10;\nconst WINDOW_HOURS = Number($env.NEWS_LOOKBACK_HOURS || 6);   // \"new\" = published within this window\nconst SUMMARY_LEN = 220;\nconst THEMES = {\n  TRUMP:    { label: '🇺🇸 Trump & Policy',   re: /trump|white house|tariffs?|truth social|executive order|bessent|powell|fed chair/i },\n  EXCHANGE: { label: '🏛 Stock Exchanges',   re: /stock exchange|nyse|nasdaq|s&p 500|dow jones|dow\\b|wall street|ftse|nikkei|hang seng|\\bdax\\b|cac 40|kospi|stoxx|shanghai|futures|\\bipo\\b|stocks? (rise|fall|slip|surge|tumble|rally|jump|drop)/i },\n  MONEY:    { label: '💰 Big Money Flows',   re: /billion|trillion|inflows?|outflows?|etf flows?|institutional|hedge fund|sovereign wealth|buyback|record investment|block deal|capital flows?|\\bfii\\b|\\bfpi\\b|\\bdii\\b|whales?|mega.?deal|acquisition|takeover|merger|stake/i },\n};\nconst INDIA_RE = /nifty|sensex|\\bnse\\b|\\bbse\\b|india|rupee|sebi|dalal|mumbai|\\bfii\\b|\\bdii\\b/i;\n// =================================================================\n\nconst safe = n => { try { return $(n).all().map(i => i.json); } catch (e) { return []; } };\nconst strip = s => String(s || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')\n  .replace(/&quot;/g, '\"').replace(/&#0?39;/g, \"'\").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\\s+/g, ' ').trim();\nconst esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst escAttr = s => esc(s).replace(/\"/g, '&quot;');\nconst isUrl = u => typeof u === 'string' && /^https?:\\/\\//i.test(u);\nconst host = u => { try { return new URL(u).hostname.replace(/^www\\./, ''); } catch (e) { return ''; } };\n\nconst raw = { yahoo: 0, google: 0, finnhub: 0, other: 0 };\nconst items = [];\n\n// ---- RSS (Yahoo + Google News) ----\nfor (const j of safe('Read RSS')) {\n  if (!j.title || !j.link) continue;\n  const h = host(j.link);\n  let title = strip(j.title), source = '', origin = 'other';\n  if (h.includes('news.google.com')) {\n    origin = 'google';\n    const k = title.lastIndexOf(' - ');\n    if (k > 0) { source = title.slice(k + 3); title = title.slice(0, k); }\n    source = source || 'Google News';\n  } else if (h.includes('yahoo.com')) { origin = 'yahoo'; source = 'Yahoo Finance'; }\n  else source = host(j.link);\n  raw[origin]++;\n  let summary = strip(j.contentSnippet || j.content || j.summary || '');\n  if (!summary || summary.toLowerCase().startsWith(title.toLowerCase().slice(0, 30))) summary = '';\n  const imgFromHtml = (String(j.content || '').match(/<img[^>]+src=[\"']([^\"']+)[\"']/i) || [])[1];\n  const image = [j.enclosure && j.enclosure.url, j['media:content'] && j['media:content'].$ && j['media:content'].$.url,\n                 j.mediaContent && j.mediaContent.url, imgFromHtml].find(isUrl) || '';\n  const t = Date.parse(j.isoDate || j.pubDate || '') || 0;\n  items.push({ title, link: j.link, source, summary, image, t, origin });\n}\n// ---- Finnhub market news (general + merger) ----\nfor (const n of ['Finnhub General', 'Finnhub Merger']) {\n  for (const j of safe(n)) {\n    if (!j.headline || !j.url) continue;\n    raw.finnhub++;\n    items.push({ title: strip(j.headline), link: j.url, source: j.source || 'Finnhub', summary: strip(j.summary || ''),\n                 image: isUrl(j.image) ? j.image : '', t: (j.datetime || 0) * 1000, origin: 'finnhub' });\n  }\n}\n\nconst now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });\nconst counts = `Google ${raw.google} · Yahoo ${raw.yahoo} · Finnhub ${raw.finnhub}`;\nif (!items.length) {\n  return [{ json: { text: `⚠️ <b>Market Update</b> — ${now} IST\\nNo stories could be fetched (${counts}).\\nCheck the network and FINNHUB_API_KEY.`, lpo: { is_disabled: true } } }];\n}\n\n// ---- de-duplicate, tag, rank ----\nconst sd = $getWorkflowStaticData('global');\nconst sentBefore = new Set(sd.sent || []);\nconst seenKey = new Set(); const pool = [];\nfor (const it of items) {\n  const k = it.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 60);\n  if (!k || seenKey.has(k) || seenKey.has(it.link)) continue;\n  seenKey.add(k); seenKey.add(it.link);\n  const txt = it.title + ' ' + it.summary;\n  it.india = INDIA_RE.test(txt);\n  it.themes = Object.keys(THEMES).filter(x => THEMES[x].re.test(txt));\n  it.fresh = it.t === 0 || it.t >= Date.now() - WINDOW_HOURS * 3600e3;\n  it.unseen = !sentBefore.has(it.link);\n  it.score = it.t + (it.image ? 45 * 60e3 : 0);\n  pool.push(it);\n}\nconst rank = (a, b) => (b.unseen - a.unseen) || (b.fresh - a.fresh) || (b.score - a.score);\npool.sort(rank);\n\nconst picked = []; const used = new Set();\nconst take = (it, theme) => { if (used.has(it) ) return false; used.add(it); it.theme = theme; picked.push(it); return true; };\n\n// 1) international: round-robin Trump -> Exchange -> Money\nconst intlPool = pool.filter(i => !i.india);\nconst lanes = Object.keys(THEMES).map(k => intlPool.filter(i => i.themes.includes(k)));\nlet n = 0, guard = 0;\nwhile (n < INTL_COUNT && guard++ < 100) {\n  let progressed = false;\n  for (let li = 0; li < lanes.length && n < INTL_COUNT; li++) {\n    const next = lanes[li].find(i => !used.has(i));\n    if (next && take(next, Object.keys(THEMES)[li])) { n++; progressed = true; }\n  }\n  if (!progressed) break;\n}\nfor (const it of intlPool) { if (n >= INTL_COUNT) break; if (take(it, it.themes[0] || null)) n++; }   // top up with other international stories\n\n// 2) other: India first (up to 4), then everything else\nlet m = 0;\nfor (const it of pool.filter(i => i.india)) { if (m >= Math.min(4, OTHER_COUNT)) break; if (take(it, null)) m++; }\nfor (const it of pool) { if (m >= OTHER_COUNT) break; if (take(it, it.themes[0] && !it.india ? it.themes[0] : null)) m++; }\n// 3) guarantee the minimum\nfor (const it of pool) { if (picked.length >= MIN_TOTAL) break; take(it, null); }\n\nsd.sent = [...sentBefore, ...picked.map(i => i.link)].slice(-300);\n\nconst ago = t => { if (!t) return ''; const mins = Math.max(1, Math.round((Date.now() - t) / 60000));\n  return mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.round(mins / 60)}h ago` : `${Math.round(mins / 1440)}d ago`; };\n\nconst intlShown = picked.filter(i => !i.india && i.themes.length).length;\nconst out = [{ json: {\n  text: `🌍 <b>Market Update</b> — ${now} IST\\n${picked.length} stories · ${intlShown} international (Trump / exchanges / big money)\\nSources: ${counts}`,\n  lpo: { is_disabled: true } } }];\nfor (const it of picked) {\n  const label = it.theme ? THEMES[it.theme].label : (it.india ? '🇮🇳 India Markets' : '📰 Markets');\n  const summary = it.summary ? '\\n' + esc(it.summary.length > SUMMARY_LEN ? it.summary.slice(0, SUMMARY_LEN).trim() + '…' : it.summary) : '';\n  const text = `${label}\\n<b>${esc(it.title)}</b>${summary}\\n🔗 <a href=\"${escAttr(it.link)}\">${esc(it.source)}</a>${it.t ? ' · ' + ago(it.t) : ''}`;\n  // image (if any) shows above the text; otherwise Telegram previews the article page\n  out.push({ json: { text, lpo: { url: it.image || it.link, prefer_large_media: true, show_above_text: true } } });\n}\nreturn out;"
       },
       "id": "g5",
-      "name": "Format Message",
+      "name": "Build Digest",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        740,
+        1220,
         100
       ]
     },
@@ -83,15 +117,22 @@
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: $json.text, parse_mode: 'HTML', disable_web_page_preview: true }) }}",
-        "options": {}
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: $json.text, parse_mode: 'HTML', link_preview_options: $json.lpo }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          }
+        }
       },
       "id": "g6",
-      "name": "Send to Telegram",
+      "name": "Send Updates",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        980,
+        1460,
         100
       ],
       "retryOnFail": true,
@@ -100,6 +141,61 @@
     }
   ],
   "connections": {
+    "Feed List": {
+      "main": [
+        [
+          {
+            "node": "Read RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read RSS": {
+      "main": [
+        [
+          {
+            "node": "Finnhub General",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finnhub General": {
+      "main": [
+        [
+          {
+            "node": "Finnhub Merger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finnhub Merger": {
+      "main": [
+        [
+          {
+            "node": "Build Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Digest": {
+      "main": [
+        [
+          {
+            "node": "Send Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Every 3 Hours": {
       "main": [
         [
@@ -116,39 +212,6 @@
         [
           {
             "node": "Feed List",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Feed List": {
-      "main": [
-        [
-          {
-            "node": "Read RSS",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Read RSS": {
-      "main": [
-        [
-          {
-            "node": "Format Message",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Format Message": {
-      "main": [
-        [
-          {
-            "node": "Send to Telegram",
             "type": "main",
             "index": 0
           }
