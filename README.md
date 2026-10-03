@@ -3,7 +3,7 @@
 | Workflow file | Schedule (IST) | What it sends |
 |---|---|---|
 | `workflows/india-market-oi-hourly.json` | `0 9-15 * * 1-5` (hourly 9:00–15:00, Mon–Fri) | Nifty & BankNifty: spot, call/put OI, OI change, PCR, max-OI strikes. Sensex: index level only |
-| `workflows/global-market-news-3h.json` | `0 */3 * * *` (every 3 h) | Latest headlines for US, London/Europe, Asia (RSS) |
+| `workflows/global-market-news-3h.json` | `0 */3 * * *` (every 3 h) | 12 market stories per run: 5 international (Trump / stock exchanges / big money flows) + India and general markets, from Yahoo Finance RSS, Google News RSS and the Finnhub market-news API. Each story = headline, summary, source hyperlink, image |
 
 Each workflow also has a **Manual Test** trigger so you can run it any time.
 
@@ -11,6 +11,18 @@ Each workflow also has a **Manual Test** trigger so you can run it any time.
 1. In Telegram, message **@BotFather** → `/newbot` → copy the token.
 2. Send any message to your new bot, then open
    `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `message.chat.id`.
+
+## 1b. Finnhub API key (free, 1 minute)
+Sign up at finnhub.io, copy the API key from the dashboard (free plan, 60 calls/min) and put it in `.env` as
+`FINNHUB_API_KEY=...` (for GitHub Actions add it as a repo secret with the same name). Without a key the workflow
+still works from Yahoo + Google News; the header line shows `Finnhub 0`.
+
+**How the news message works:** each run sends a short header, then one Telegram message per story (about 12, one per
+~1 second). Stories with an image (Finnhub, some Yahoo items) show it above the text; for the others Telegram shows the
+article's own preview. The source name is the hyperlink. "New" = published in the last `NEWS_LOOKBACK_HOURS` (default 6)
+and not already sent by this n8n instance; if fewer than 10 qualify, older stories fill up to 10. Tunables are at the
+top of the *Build Digest* node (`INTL_COUNT`, `OTHER_COUNT`, `MIN_TOTAL`, theme keywords); feeds are in *Feed List*.
+Google News links open Google's redirect page, and Google RSS items have no images.
 
 ## 2. Test on your PC (Docker Desktop required)
 ```bash
@@ -27,19 +39,24 @@ to `workflows/`. Quick edits without the UI: feeds are in the **Feed List** node
 region mapping and headline count at the top of **Format Message**.
 
 ## 3. Free hosting with 4 automatic runs a day: GitHub Actions (recommended)
-No server at all. GitHub starts a free VM on a schedule, runs your workflow inside a throw-away n8n container,
-sends the Telegram message and shuts down. Your workflow JSON files stay the single source of truth.
+No server at all. GitHub starts a free VM on a schedule, loads **every workflow in `./workflows`** into a throw-away
+n8n container, runs them one after another, sends the Telegram messages and shuts down.
 
 1. Create a **private** GitHub repo and push this folder (the `.github/workflows/n8n-scheduled.yml` path must stay as is).
-2. Repo -> Settings -> Secrets and variables -> Actions -> add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
-3. Actions tab -> "n8n scheduled runs" -> **Run workflow** (pick `global`, then `india`) to test.
-4. Done. Schedules (UTC cron in the YAML): India IST 09:30 / 11:30 / 13:30 / 15:00 Mon-Fri, Global IST 06:30 / 13:30 / 19:30 / 02:00.
-   Edit the `cron:` lines to change times; `NEWS_LOOKBACK_HOURS` (8) controls how far back the news window looks.
+2. Repo -> Settings -> Secrets and variables -> Actions -> add `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` and `FINNHUB_API_KEY`.
+3. Actions tab -> "n8n scheduled runs" -> **Run workflow** to test (leave the box empty to run all, or type
+   `india` / `news` to run only matching files).
+4. Done. Runs Mon-Fri at IST 09:30, 13:30, 15:15 and 19:30 (UTC `cron:` lines in the YAML; edit to change).
+
+* New workflow? Drop its `.json` into `workflows/` and it runs automatically. Files starting with `telegram-hi-` or `_`
+  are skipped (they need an always-on n8n); change the `case` line in the YAML to skip others.
+* If one workflow fails the others still run, and the job is marked failed so GitHub emails you.
+* Every run sends both the India and the global message, so the 19:30 run shows India closing data. Remove a run time
+  or move a workflow into a skipped name if you don't want that. `NEWS_LOOKBACK_HOURS` (6) sets how far back news goes.
 
 Cost: $0. Public repos get unlimited free minutes; private repos get 2,000 min/month on the Free plan
-(~8 runs/day x ~2 min = ~500 min/month). GitHub cron is best-effort and can start a few minutes late. Scheduled
+(~4 runs x ~3 min x ~22 days = ~270 min/month). GitHub cron is best-effort and can start a few minutes late. Scheduled
 workflows in *public* repos are disabled after 60 days without repo activity (not an issue for private repos).
-The `n8n execute` CLI is used; if a future n8n version changes it, pin `N8N_VERSION` in the YAML.
 GitHub's runners are in US datacenters, so **NSE will probably block the India workflow** there; the message then
 says "NSE data unavailable". To fix: install a GitHub *self-hosted runner* on your own PC (free, home IP; PC must be on)
 and change `runs-on: ubuntu-latest` to `runs-on: self-hosted`.

@@ -48,10 +48,11 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         run: |
           docker run --rm --entrypoint /bin/sh \
             -v "$PWD/workflows:/workflows:ro" \
-            -e TELEGRAM_BOT_TOKEN -e TELEGRAM_CHAT_ID -e WF_IDS \
+            -e TELEGRAM_BOT_TOKEN -e TELEGRAM_CHAT_ID -e FINNHUB_API_KEY -e WF_IDS \
             -e TZ=Asia/Kolkata -e GENERIC_TIMEZONE=Asia/Kolkata \
             -e N8N_BLOCK_ENV_ACCESS_IN_NODE=false \
             -e NEWS_LOOKBACK_HOURS=6 \
