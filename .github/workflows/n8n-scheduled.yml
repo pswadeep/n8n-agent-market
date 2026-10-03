@@ -1,0 +1,55 @@
+# Free "serverless n8n": GitHub starts a VM on schedule, runs ONE workflow in a throw-away n8n container, then discards it.
+# Cron times are UTC (IST = UTC+5:30). 4 runs per day per workflow.
+name: n8n scheduled runs
+
+on:
+  schedule:
+    - cron: '0 4,6,8 * * 1-5'   # India market  IST 09:30, 11:30, 13:30 (Mon-Fri)
+    - cron: '30 9 * * 1-5'      # India market  IST 15:00 (Mon-Fri)
+    - cron: '0 1,8,14 * * *'    # Global news   IST 06:30, 13:30, 19:30
+    - cron: '30 20 * * *'       # Global news   IST 02:00
+  workflow_dispatch:
+    inputs:
+      which:
+        description: Which workflow to run now
+        type: choice
+        options: [global, india]
+        default: global
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      N8N_VERSION: latest            # pin e.g. 1.100.1 for stability
+      EVENT: ${{ github.event_name }}
+      SCHEDULE: ${{ github.event.schedule }}
+      WHICH: ${{ inputs.which }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick workflow
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then W="$WHICH"
+          elif [ "$SCHEDULE" = "0 4,6,8 * * 1-5" ] || [ "$SCHEDULE" = "30 9 * * 1-5" ]; then W=india
+          else W=global; fi
+          if [ "$W" = "india" ]; then echo "WF_ID=wfIndiaMarketOI01" >> "$GITHUB_ENV"; else echo "WF_ID=wfGlobalNews3h01" >> "$GITHUB_ENV"; fi
+          echo "Running: $W"
+
+      - name: Run workflow in n8n
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          docker run --rm --entrypoint /bin/sh \
+            -v "$PWD/workflows:/workflows:ro" \
+            -e TELEGRAM_BOT_TOKEN -e TELEGRAM_CHAT_ID \
+            -e TZ=Asia/Kolkata -e GENERIC_TIMEZONE=Asia/Kolkata \
+            -e N8N_BLOCK_ENV_ACCESS_IN_NODE=false \
+            -e NEWS_LOOKBACK_HOURS=8 \
+            -e N8N_DIAGNOSTICS_ENABLED=false \
+            "docker.n8n.io/n8nio/n8n:${N8N_VERSION}" \
+            -c "n8n import:workflow --separate --input=/workflows && n8n execute --id=${WF_ID}"

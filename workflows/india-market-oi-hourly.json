@@ -1,0 +1,281 @@
+{
+  "id": "wfIndiaMarketOI01",
+  "name": "India Market - Nifty/BankNifty/Sensex + OI (hourly 9-3 IST)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cron",
+              "expression": "0 9-15 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "n1",
+      "name": "Hourly 9-15 IST Mon-Fri",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "n2",
+      "name": "Manual Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.nseindia.com/option-chain",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.9"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "n3",
+      "name": "NSE Session",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect NSE session cookies from the first call and fan out to the two indices.\nconst sc = $input.first().json.headers?.['set-cookie'] || [];\nconst cookie = (Array.isArray(sc) ? sc : [sc]).map(c => c.split(';')[0]).join('; ');\n// Add/remove NSE index symbols here (e.g. 'FINNIFTY', 'MIDCPNIFTY').\nreturn ['NIFTY', 'BANKNIFTY'].map(symbol => ({ json: { symbol, cookie } }));"
+      },
+      "id": "n4",
+      "name": "Prepare Requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.nseindia.com/api/option-chain-indices?symbol={{ $json.symbol }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "https://www.nseindia.com/option-chain"
+            },
+            {
+              "name": "Cookie",
+              "value": "={{ $json.cookie }}"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1500
+            }
+          }
+        }
+      },
+      "id": "n5",
+      "name": "NSE Option Chain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EBSESN?interval=1d&range=1d",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "n6",
+      "name": "Sensex Quote",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        980,
+        100
+      ],
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const symbols = $('Prepare Requests').all().map(i => i.json.symbol);\nconst chains  = $('NSE Option Chain').all().map(i => i.json);\nconst fmt = n => Number(n).toLocaleString('en-IN');\nconst sgn = n => (n > 0 ? '+' : '') + fmt(n);\nconst now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });\nconst out = [`📊 <b>India Market Update</b> — ${now} IST`];\n\nchains.forEach((c, i) => {\n  const name = symbols[i];\n  const rec = c && c.records;\n  if (!rec || !rec.data || !rec.data.length) {\n    out.push(`\\n<b>${name}</b>: NSE data unavailable (request blocked or session expired)`);\n    return;\n  }\n  const expiry = rec.expiryDates[0];                       // nearest expiry\n  const rows = rec.data.filter(r => r.expiryDate === expiry);\n  let ceOI = 0, peOI = 0, ceChg = 0, peChg = 0;\n  let maxCE = { oi: 0, strike: 0 }, maxPE = { oi: 0, strike: 0 };\n  for (const r of rows) {\n    if (r.CE) {\n      ceOI += r.CE.openInterest || 0; ceChg += r.CE.changeinOpenInterest || 0;\n      if ((r.CE.openInterest || 0) > maxCE.oi) maxCE = { oi: r.CE.openInterest, strike: r.strikePrice };\n    }\n    if (r.PE) {\n      peOI += r.PE.openInterest || 0; peChg += r.PE.changeinOpenInterest || 0;\n      if ((r.PE.openInterest || 0) > maxPE.oi) maxPE = { oi: r.PE.openInterest, strike: r.strikePrice };\n    }\n  }\n  const pcr = ceOI ? (peOI / ceOI).toFixed(2) : 'n/a';\n  out.push(\n`\\n<b>${name}</b>  ${fmt(rec.underlyingValue)}  (expiry ${expiry})\nCall OI ${fmt(ceOI)} (${sgn(ceChg)}) | Put OI ${fmt(peOI)} (${sgn(peChg)})\nPCR ${pcr} | Max Call OI (resistance) ${maxCE.strike} | Max Put OI (support) ${maxPE.strike}`);\n});\n\n// Sensex: index level only (BSE has no free public OI feed)\nconst m = $input.first().json?.chart?.result?.[0]?.meta;\nif (m && m.regularMarketPrice) {\n  const prev = m.chartPreviousClose ?? m.previousClose;\n  const ch = prev ? m.regularMarketPrice - prev : 0;\n  const pct = prev ? (ch / prev * 100).toFixed(2) : '0.00';\n  out.push(`\\n<b>SENSEX</b>  ${fmt(m.regularMarketPrice)}  (${ch >= 0 ? '+' : ''}${ch.toFixed(2)}, ${pct}%)\\nOI: not available from a free public source`);\n} else {\n  out.push(`\\n<b>SENSEX</b>: quote unavailable`);\n}\nreturn [{ json: { text: out.join('\\n') } }];"
+      },
+      "id": "n7",
+      "name": "Format Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: $json.text, parse_mode: 'HTML', disable_web_page_preview: true }) }}",
+        "options": {}
+      },
+      "id": "n8",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1460,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "Hourly 9-15 IST Mon-Fri": {
+      "main": [
+        [
+          {
+            "node": "NSE Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test": {
+      "main": [
+        [
+          {
+            "node": "NSE Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NSE Session": {
+      "main": [
+        [
+          {
+            "node": "Prepare Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Requests": {
+      "main": [
+        [
+          {
+            "node": "NSE Option Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NSE Option Chain": {
+      "main": [
+        [
+          {
+            "node": "Sensex Quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sensex Quote": {
+      "main": [
+        [
+          {
+            "node": "Format Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Message": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata"
+  }
+}

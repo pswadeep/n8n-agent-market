@@ -1,0 +1,20 @@
+# Same file is used on your PC and on the server (arm64 and x86 both supported).
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:-latest}   # pin a version in .env for stability
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"          # localhost only; on the server use an SSH tunnel
+    env_file: .env
+    environment:
+      - TZ=${GENERIC_TIMEZONE:-Asia/Kolkata}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Kolkata}   # schedules fire in IST
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false                   # lets workflows read $env.TELEGRAM_*
+      - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-false}
+      - N8N_DIAGNOSTICS_ENABLED=false
+    volumes:
+      - n8n_data:/home/node/.n8n        # database + credentials + execution history
+      - ./workflows:/workflows          # workflow JSON files (import / export)
+volumes:
+  n8n_data:

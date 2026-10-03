@@ -1,0 +1,415 @@
+{
+  "id": "wfTelegramHiHook01",
+  "name": "Telegram 'hi' -> latest market updates (Telegram Trigger, needs public HTTPS)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "h1",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "e6e8483b-80da-4e1b-9af1-6ba0caf6cc7b"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Only react to \"hi\"-style words from YOUR chat. Edit TRIGGER to change the words.\nconst TRIGGER = /^\\s*(hi|hello|hey|\\/start|update|\\/update)\\s*[.!]*\\s*$/i;\nconst m = $json.message;\nconst ok = m && m.text && String(m.chat.id) === String($env.TELEGRAM_CHAT_ID) && TRIGGER.test(m.text);\nreturn ok ? [{ json: { text: m.text } }] : [];"
+      },
+      "id": "h2",
+      "name": "Get New Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: '⏳ Fetching latest market updates…', parse_mode: 'HTML', disable_web_page_preview: true }) }}",
+        "options": {}
+      },
+      "id": "h3",
+      "name": "Send Ack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "url": "https://www.nseindia.com/option-chain",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.9"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "i0",
+      "name": "NSE Session",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect NSE session cookies from the first call and fan out to the two indices.\nconst sc = $input.first().json.headers?.['set-cookie'] || [];\nconst cookie = (Array.isArray(sc) ? sc : [sc]).map(c => c.split(';')[0]).join('; ');\n// Add/remove NSE index symbols here (e.g. 'FINNIFTY', 'MIDCPNIFTY').\nreturn ['NIFTY', 'BANKNIFTY'].map(symbol => ({ json: { symbol, cookie } }));"
+      },
+      "id": "i1",
+      "name": "Prepare Requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.nseindia.com/api/option-chain-indices?symbol={{ $json.symbol }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "https://www.nseindia.com/option-chain"
+            },
+            {
+              "name": "Cookie",
+              "value": "={{ $json.cookie }}"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1500
+            }
+          }
+        }
+      },
+      "id": "i2",
+      "name": "NSE Option Chain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EBSESN?interval=1d&range=1d",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "i3",
+      "name": "Sensex Quote",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        0
+      ],
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const symbols = $('Prepare Requests').all().map(i => i.json.symbol);\nconst chains  = $('NSE Option Chain').all().map(i => i.json);\nconst fmt = n => Number(n).toLocaleString('en-IN');\nconst sgn = n => (n > 0 ? '+' : '') + fmt(n);\nconst now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });\nconst out = [`📊 <b>India Market Update</b> — ${now} IST`];\n\nchains.forEach((c, i) => {\n  const name = symbols[i];\n  const rec = c && c.records;\n  if (!rec || !rec.data || !rec.data.length) {\n    out.push(`\\n<b>${name}</b>: NSE data unavailable (request blocked or session expired)`);\n    return;\n  }\n  const expiry = rec.expiryDates[0];                       // nearest expiry\n  const rows = rec.data.filter(r => r.expiryDate === expiry);\n  let ceOI = 0, peOI = 0, ceChg = 0, peChg = 0;\n  let maxCE = { oi: 0, strike: 0 }, maxPE = { oi: 0, strike: 0 };\n  for (const r of rows) {\n    if (r.CE) {\n      ceOI += r.CE.openInterest || 0; ceChg += r.CE.changeinOpenInterest || 0;\n      if ((r.CE.openInterest || 0) > maxCE.oi) maxCE = { oi: r.CE.openInterest, strike: r.strikePrice };\n    }\n    if (r.PE) {\n      peOI += r.PE.openInterest || 0; peChg += r.PE.changeinOpenInterest || 0;\n      if ((r.PE.openInterest || 0) > maxPE.oi) maxPE = { oi: r.PE.openInterest, strike: r.strikePrice };\n    }\n  }\n  const pcr = ceOI ? (peOI / ceOI).toFixed(2) : 'n/a';\n  out.push(\n`\\n<b>${name}</b>  ${fmt(rec.underlyingValue)}  (expiry ${expiry})\nCall OI ${fmt(ceOI)} (${sgn(ceChg)}) | Put OI ${fmt(peOI)} (${sgn(peChg)})\nPCR ${pcr} | Max Call OI (resistance) ${maxCE.strike} | Max Put OI (support) ${maxPE.strike}`);\n});\n\n// Sensex: index level only (BSE has no free public OI feed)\nconst m = $input.first().json?.chart?.result?.[0]?.meta;\nif (m && m.regularMarketPrice) {\n  const prev = m.chartPreviousClose ?? m.previousClose;\n  const ch = prev ? m.regularMarketPrice - prev : 0;\n  const pct = prev ? (ch / prev * 100).toFixed(2) : '0.00';\n  out.push(`\\n<b>SENSEX</b>  ${fmt(m.regularMarketPrice)}  (${ch >= 0 ? '+' : ''}${ch.toFixed(2)}, ${pct}%)\\nOI: not available from a free public source`);\n} else {\n  out.push(`\\n<b>SENSEX</b>: quote unavailable`);\n}\nreturn [{ json: { text: out.join('\\n') } }];"
+      },
+      "id": "i4",
+      "name": "Format India",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: $json.text, parse_mode: 'HTML', disable_web_page_preview: true }) }}",
+        "options": {}
+      },
+      "id": "i9",
+      "name": "Send India",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Add or remove RSS feeds here. Region is derived from the article domain in 'Format Message'.\nconst feeds = [\n  { url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664' }, // US\n  { url: 'https://finance.yahoo.com/news/rssindex' },                                              // US\n  { url: 'https://feeds.bbci.co.uk/news/business/rss.xml' },                                       // London\n  { url: 'https://www.theguardian.com/business/rss' },                                             // London\n  { url: 'https://asia.nikkei.com/rss/feed/nar' },                                                 // Asia\n  { url: 'https://www.straitstimes.com/news/business/rss.xml' },                                   // Asia\n];\nreturn feeds.map(f => ({ json: f }));"
+      },
+      "id": "g0",
+      "name": "Feed List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "id": "g1",
+      "name": "Read RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        400
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// domain suffix -> region. Extend this map when you add feeds.\nconst MAP = {\n  'cnbc.com': 'US', 'yahoo.com': 'US',\n  'bbc.co.uk': 'LONDON', 'bbc.com': 'LONDON', 'theguardian.com': 'LONDON',\n  'nikkei.com': 'ASIA', 'straitstimes.com': 'ASIA',\n};\nconst regionOf = link => {\n  try { const h = new URL(link).hostname; for (const k in MAP) if (h.endsWith(k)) return MAP[k]; } catch (e) {}\n  return 'OTHER';\n};\nconst HOURS = Number($env.NEWS_LOOKBACK_HOURS || 3.25);   // look-back window; set NEWS_LOOKBACK_HOURS=8 for 4 runs/day\nconst cutoff = Date.now() - HOURS * 3600 * 1000;\nconst PER_REGION = 4;\nconst esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n\nconst buckets = { US: [], LONDON: [], ASIA: [], OTHER: [] };\nconst seen = new Set();\nfor (const it of $input.all()) {\n  const j = it.json;\n  if (!j.title || !j.link || seen.has(j.link)) continue;   // skips failed feeds too\n  seen.add(j.link);\n  const t = Date.parse(j.isoDate || j.pubDate || '');\n  if (!isNaN(t) && t < cutoff) continue;                   // too old\n  buckets[regionOf(j.link)].push({ title: j.title, link: j.link, t: isNaN(t) ? 0 : t });\n}\nconst heads = { US: '🇺🇸 <b>US</b>', LONDON: '🇬🇧 <b>London / Europe</b>', ASIA: '🌏 <b>Asia</b>' };\nconst now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });\nlet text = `🌍 <b>Global Markets News</b> — ${now} IST`;\nfor (const r of ['US', 'LONDON', 'ASIA']) {\n  const list = buckets[r].sort((a, b) => b.t - a.t).slice(0, PER_REGION);\n  text += `\\n\\n${heads[r]}\\n` + (list.length\n    ? list.map(x => `• <a href=\"${esc(x.link)}\">${esc(x.title)}</a>`).join('\\n')\n    : '• no new headlines in this window');\n}\nreturn [{ json: { text } }];"
+      },
+      "id": "g2",
+      "name": "Format News",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: $json.text, parse_mode: 'HTML', disable_web_page_preview: true }) }}",
+        "options": {}
+      },
+      "id": "g9",
+      "name": "Send News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        400
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get New Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get New Messages": {
+      "main": [
+        [
+          {
+            "node": "Send Ack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Ack": {
+      "main": [
+        [
+          {
+            "node": "NSE Session",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Feed List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NSE Session": {
+      "main": [
+        [
+          {
+            "node": "Prepare Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Requests": {
+      "main": [
+        [
+          {
+            "node": "NSE Option Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NSE Option Chain": {
+      "main": [
+        [
+          {
+            "node": "Sensex Quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sensex Quote": {
+      "main": [
+        [
+          {
+            "node": "Format India",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format India": {
+      "main": [
+        [
+          {
+            "node": "Send India",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Feed List": {
+      "main": [
+        [
+          {
+            "node": "Read RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read RSS": {
+      "main": [
+        [
+          {
+            "node": "Format News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format News": {
+      "main": [
+        [
+          {
+            "node": "Send News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata"
+  }
+}
